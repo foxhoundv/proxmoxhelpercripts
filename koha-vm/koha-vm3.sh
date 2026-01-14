@@ -13,7 +13,7 @@ function header_info {
     __ __      __         _    ____  ___
    / //_/___  / /  ____ _| |  / /  |/  /
   / ,<  / _ \/ __ \/ __ `/ | / / /|_/ / 
- / /| |/ // / / / / /_/ /| |/ / /  / /  
+ / /| |/  __/ / / / /_/ /| |/ / /  / /  
 /_/ |_|\___/_/ /_/\__,_/ |___/_/  /_/   
                                         
 EOF
@@ -679,16 +679,36 @@ msg_info "Injecting installation files into VM image"
 # Mount the image and inject files
 modprobe nbd max_part=8
 qemu-nbd --connect=/dev/nbd0 ${FILE}
+sleep 3
+
+# Wait for partitions to be available
+partprobe /dev/nbd0 2>/dev/null || true
 sleep 2
 
-# Find the root partition
-ROOT_PART=$(lsblk /dev/nbd0 -o NAME,FSTYPE,MOUNTPOINT | grep -E 'ext4|xfs' | head -1 | awk '{print $1}' | sed 's/[^0-9]*//g')
+# List available partitions
+lsblk /dev/nbd0
+
+# Find the root partition - look for the largest partition
+ROOT_PART=$(lsblk /dev/nbd0 -b -o NAME,SIZE | grep nbd0p | sort -k2 -n -r | head -1 | awk '{print $1}' | sed 's/nbd0p//')
+
 if [ -z "$ROOT_PART" ]; then
-  ROOT_PART="1"
+  msg_error "Could not find root partition"
+  qemu-nbd --disconnect /dev/nbd0
+  exit 1
 fi
+
+echo "Using partition: /dev/nbd0p${ROOT_PART}"
 
 mkdir -p /mnt/koha-temp
 mount /dev/nbd0p${ROOT_PART} /mnt/koha-temp
+
+# Verify mount was successful
+if ! mountpoint -q /mnt/koha-temp; then
+  msg_error "Failed to mount partition"
+  qemu-nbd --disconnect /dev/nbd0
+  rmdir /mnt/koha-temp
+  exit 1
+fi
 
 # Copy files
 cp install-koha.sh /mnt/koha-temp/root/
@@ -706,7 +726,8 @@ if [ -n "$SSH_KEY" ]; then
   chmod 600 /mnt/koha-temp/root/.ssh/authorized_keys
 fi
 
-# Unmount
+# Unmount and cleanup
+sync
 umount /mnt/koha-temp
 qemu-nbd --disconnect /dev/nbd0
 rmdir /mnt/koha-temp
