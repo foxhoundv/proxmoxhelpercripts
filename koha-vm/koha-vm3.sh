@@ -642,14 +642,14 @@ sleep 5
 KOHA_PASS=$(xmlstarlet sel -t -v 'yazgfs/config/pass' /etc/koha/sites/INSTANCENAME/koha-conf.xml 2>/dev/null || koha-passwd INSTANCENAME 2>/dev/null || echo "Run 'koha-passwd INSTANCENAME' to get password")
 
 # Save credentials
-cat > /root/koha-credentials.txt <<EOF
+cat > /root/koha-credentials.txt <<EOFCREDS
 Koha Instance: INSTANCENAME
 Koha Admin User: koha_INSTANCENAME
 Koha Admin Password: $KOHA_PASS
 MariaDB Root Password: DBPASSWORD
 OPAC URL: http://$(hostname -I | awk '{print $1}')
 Staff URL: http://$(hostname -I | awk '{print $1}'):8080
-EOF
+EOFCREDS
 chmod 600 /root/koha-credentials.txt
 
 echo "Koha installation completed at $(date)"
@@ -663,12 +663,12 @@ systemctl daemon-reload
 EOFSCRIPT
 
 # Replace placeholders
-sed -i "s/DBPASSWORD/$DB_ROOT_PASS/g" install-koha.sh
-sed -i "s/INSTANCENAME/$KOHA_INSTANCE/g" install-koha.sh
+sed -i "s/DBPASSWORD/${DB_ROOT_PASS}/g" install-koha.sh
+sed -i "s/INSTANCENAME/${KOHA_INSTANCE}/g" install-koha.sh
 chmod +x install-koha.sh
 
 # Create systemd service for first boot
-cat > koha-install.service <<EOF
+cat > koha-install.service <<EOFSERVICE
 [Unit]
 Description=Koha Installation Script
 After=network-online.target cloud-init.service
@@ -683,7 +683,7 @@ StandardError=journal
 
 [Install]
 WantedBy=multi-user.target
-EOF
+EOFSERVICE
 
 msg_ok "Created installation script"
 
