@@ -13,7 +13,7 @@ function header_info {
     __ __      __         _    ____  ___
    / //_/___  / /  ____ _| |  / /  |/  /
   / ,<  / _ \/ __ \/ __ `/ | / / /|_/ / 
- / /| |/ // / / / / /_/ /| |/ / /  / /  
+ / /| |/  __/ / / / /_/ /| |/ / /  / /  
 /_/ |_|\___/_/ /_/\__,_/ |___/_/  /_/   
                                         
 EOF
@@ -639,16 +639,16 @@ systemctl restart apache2
 
 # Get Koha credentials
 sleep 5
-KOHA_PASS=$(xmlstarlet sel -t -v 'yazgfs/config/pass' /etc/koha/sites/INSTANCENAME/koha-conf.xml 2>/dev/null || koha-passwd INSTANCENAME 2>/dev/null || echo "Run 'koha-passwd INSTANCENAME' to get password")
+KOHA_PASS=\$(xmlstarlet sel -t -v 'yazgfs/config/pass' /etc/koha/sites/INSTANCENAME/koha-conf.xml 2>/dev/null || koha-passwd INSTANCENAME 2>/dev/null || echo "Run 'koha-passwd INSTANCENAME' to get password")
 
 # Save credentials
 cat > /root/koha-credentials.txt <<EOFCREDS
 Koha Instance: INSTANCENAME
 Koha Admin User: koha_INSTANCENAME
-Koha Admin Password: $KOHA_PASS
+Koha Admin Password: \$KOHA_PASS
 MariaDB Root Password: DBPASSWORD
-OPAC URL: http://$(hostname -I | awk '{print $1}')
-Staff URL: http://$(hostname -I | awk '{print $1}'):8080
+OPAC URL: http://\$(hostname -I | awk '{print \$1}')
+Staff URL: http://\$(hostname -I | awk '{print \$1}'):8080
 EOFCREDS
 chmod 600 /root/koha-credentials.txt
 
@@ -738,7 +738,7 @@ if [ -n "$DISK_SIZE" ]; then
 fi
 
 DESCRIPTION=$(
-  cat <<EOF
+  cat <<'EOFDESC'
 <div align='center'>
   <a href='https://Helper-Scripts.com' target='_blank' rel='noopener noreferrer'>
     <img src='https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/misc/images/logo-81x112.png' alt='Logo' style='width:81px;height:112px;'/>
@@ -768,7 +768,7 @@ DESCRIPTION=$(
 
 <h3>Access Information</h3>
 <ul>
-  <li><strong>Instance Name:</strong> $KOHA_INSTANCE</li>
+  <li><strong>Instance Name:</strong> INSTANCENAME_PLACEHOLDER</li>
   <li><strong>OPAC URL:</strong> http://[VM-IP]</li>
   <li><strong>Staff Interface:</strong> http://[VM-IP]:8080</li>
   <li><strong>Credentials:</strong> Located in /root/koha-credentials.txt</li>
@@ -781,8 +781,9 @@ DESCRIPTION=$(
   <li>Access staff interface at http://[VM-IP]:8080</li>
   <li>Complete the web installer</li>
 </ol>
-EOF
+EOFDESC
 )
+DESCRIPTION="${DESCRIPTION//INSTANCENAME_PLACEHOLDER/$KOHA_INSTANCE}"
 qm set $VMID -description "$DESCRIPTION" >/dev/null
 msg_ok "Set VM Description"
 
