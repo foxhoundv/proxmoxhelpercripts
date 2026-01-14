@@ -15,7 +15,7 @@ function header_info {
   / ,<  / _ \/ __ \/ __ `/ | / / /|_/ / 
  / /| |/ // / / / / /_/ /| |/ / /  / /  
 /_/ |_|\___/_/ /_/\__,_/ |___/_/  /_/   
-                                        
+                                         
 EOF
 }
 header_info
@@ -204,7 +204,7 @@ function arch_check() {
 function ssh_check() {
   if command -v pveversion >/dev/null 2>&1; then
     if [ -n "${SSH_CLIENT:+x}" ]; then
-      if whiptail --backtitle "Proxmox VE Helper Scripts" --defaultno --title "SSH DETECTED" --yesno "It's suggested to use the Proxmox shell instead of SSH, since SSH can create issues while gathering variables. Would you like to proceed with using SSH?" 10 62; then
+      if whiptail --backtitle "Proxmox VE Helper Scripts" --defaultno --title "SSH DETECTED" --yesno "It's suggested to use the Proxmox shell instead of SSH, since SSH can create issues while gat[...]
         echo "you've been warned"
       else
         clear
@@ -404,7 +404,7 @@ function advanced_settings() {
     exit-script
   fi
 
-  if MTU1=$(whiptail --backtitle "Proxmox VE Helper Scripts" --inputbox "Set Interface MTU Size (leave blank for default)" 8 58 --title "MTU SIZE" --cancel-button Exit-Script 3>&1 1>&2 2>&3); then
+  if MTU1=$(whiptail --backtitle "Proxmox VE Helper Scripts" --inputbox "Set Interface MTU Size (leave blank for default)" 8 58 --title "MTU SIZE" --cancel-button Exit-Script 3>&1 1>&2 2>&3); the[...]
     if [ -z $MTU1 ]; then
       MTU1="Default"
       MTU=""
@@ -619,6 +619,11 @@ wget -qO - http://debian.koha-community.org/koha/gpg.asc | apt-key add -
 # Update package lists
 apt-get update
 
+# Install qemu-guest-agent so Proxmox can interact with the guest (IP reporting, graceful shutdown, guest-info)
+DEBIAN_FRONTEND=noninteractive apt-get install -y qemu-guest-agent
+systemctl enable qemu-guest-agent || true
+systemctl start qemu-guest-agent || true
+
 # Install MariaDB
 echo "mariadb-server mysql-server/root_password password DBPASSWORD" | debconf-set-selections
 echo "mariadb-server mysql-server/root_password_again password DBPASSWORD" | debconf-set-selections
@@ -639,16 +644,16 @@ systemctl restart apache2
 
 # Get Koha credentials
 sleep 5
-KOHA_PASS=\$(xmlstarlet sel -t -v 'yazgfs/config/pass' /etc/koha/sites/INSTANCENAME/koha-conf.xml 2>/dev/null || koha-passwd INSTANCENAME 2>/dev/null || echo "Run 'koha-passwd INSTANCENAME' to get password")
+KOHA_PASS=$(xmlstarlet sel -t -v 'yazgfs/config/pass' /etc/koha/sites/INSTANCENAME/koha-conf.xml 2>/dev/null || koha-passwd INSTANCENAME 2>/dev/null || echo "Run 'koha-passwd INSTANCENAME' to ge[...])
 
 # Save credentials
 cat > /root/koha-credentials.txt <<EOFCREDS
 Koha Instance: INSTANCENAME
 Koha Admin User: koha_INSTANCENAME
-Koha Admin Password: \$KOHA_PASS
+Koha Admin Password: $KOHA_PASS
 MariaDB Root Password: DBPASSWORD
-OPAC URL: http://\$(hostname -I | awk '{print \$1}')
-Staff URL: http://\$(hostname -I | awk '{print \$1}'):8080
+OPAC URL: http://$(hostname -I | awk '{print $1}')
+Staff URL: http://$(hostname -I | awk '{print $1}'):8080
 EOFCREDS
 chmod 600 /root/koha-credentials.txt
 
