@@ -13,7 +13,7 @@ source <(curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxV
 # to run the invenio-app-ils docker-compose.full.yml stack. If rootless provisioning fails,
 # it automatically falls back by creating a new PRIVILEGED LXC and provisioning Docker there.
 
-APP="InvenioILS (invenio-app-ils)"
+APP="InvenioILS"
 var_tags="${var_tags:-invenio;ils;invenioils}"
 var_cpu="${var_cpu:-2}"
 var_ram="${var_ram:-6144}"        # MB
