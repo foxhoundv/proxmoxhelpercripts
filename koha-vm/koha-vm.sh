@@ -7,9 +7,8 @@
 # Also attempts to source helper functions from:
 #   https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/misc/api.func
 #
-# Intended to be run as root on the Proxmox host.
-#
-# NOTE: Fixed disk parameter format for qm create to avoid LVM parsing errors.
+# This version adds detection of the Proxmox storage type (via `pvesm status`)
+# and builds the disk specification for `qm create` accordingly to avoid parsing errors.
 #
 set -euo pipefail
 PROGNAME="$(basename "$0")"
@@ -17,7 +16,7 @@ API_FUNC_URL="https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main
 TMPDIR="$(mktemp -d)"
 trap 'rm -rf "$TMPDIR"' EXIT
 
-# ---- Basic logging & helpers (small, similar style to nextcloud-vm.sh) ----
+# ---- Basic logging & helpers ----
 info()  { printf '\033[1;34m[INFO]\033[0m %s\n' "$*"; }
 warn()  { printf '\033[1;33m[WARN]\033[0m %s\n' "$*"; }
 err()   { printf '\033[1;31m[ERR]\033[0m %s\n' "$*" >&2; }
@@ -25,7 +24,6 @@ die()   { err "$*"; exit 1; }
 
 # Trim helper (remove leading/trailing whitespace)
 _trim() {
-  # usage: _trim "  string  "
   printf '%s' "$1" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'
 }
 
@@ -83,9 +81,7 @@ if [[ $EUID -ne 0 ]]; then
 fi
 
 # ---- Defaults & prompts for VM creation ----
-# Attempt to pick a sensible node name while stripping non-printable characters.
 RAW_NODE="$(pvesh get /nodes 2>/dev/null || true)"
-# Extract first token on second+ lines, then remove any non-alphanumeric/underscore/dash/dot characters.
 DEFAULT_NODE="$(printf '%s' "$RAW_NODE" | awk 'NR>1 {print $1; exit}' || true)"
 DEFAULT_NODE="$(printf '%s' "$DEFAULT_NODE" | tr -cd '[:alnum:]._-' )"
 DEFAULT_NODE="${DEFAULT_NODE:-pve}"
@@ -117,17 +113,57 @@ prompt KOHA_SITE "Koha site identifier (e.g. library)" "library"
 prompt_password KOHA_DB_PASSWORD "MariaDB Koha DB password (for 'koha' user)"
 prompt_password KOHA_ADMIN_PASSWORD "Koha SYSTEM (admin) password"
 
-# ---- Validate storage parameter (basic) ----
+# ---- Detect storage type and build disk specification ----
+STORAGE_TYPE=""
+if command -v pvesm >/dev/null 2>&1; then
+  # pvesm status prints lines like: <storage> <type> <...>
+  STORAGE_TYPE="$(pvesm status 2>/dev/null | awk -v s="$STORAGE" '$1==s {print $2; exit}' || true)"
+fi
+
+# Normalize to lowercase
+STORAGE_TYPE="$(printf '%s' "$STORAGE_TYPE" | tr '[:upper:]' '[:lower:]')"
+
+info "Detected storage type for '${STORAGE}': ${STORAGE_TYPE:-unknown}"
+
+# Build disk specification according to storage type.
+# Use explicit "vm-<vmid>-disk-0,size=<size> form for LVM/ZFS and most others to force creation
+# For 'dir' storage we can still use the same explicit form which will create a qcow2 image.
+# If storage type is unknown, fall back to explicit form and warn.
+case "$STORAGE_TYPE" in
+  lvmthin|lvm)
+    DISK_SPEC="${STORAGE}:vm-${VMID}-disk-0,size=${DISK}G"
+    ;;
+  zfspool|zfspool|zfs)
+    # zfspool often supports the same syntax; using vm-<vmid>-disk-0 is acceptable.
+    DISK_SPEC="${STORAGE}:vm-${VMID}-disk-0,size=${DISK}G"
+    ;;
+  dir|nfs|cifs)
+    # directory or network storage - create a file image
+    DISK_SPEC="${STORAGE}:vm-${VMID}-disk-0,size=${DISK}G"
+    ;;
+  thin|rbd)
+    # rbd (Ceph) or other thin types - use explicit spec
+    DISK_SPEC="${STORAGE}:vm-${VMID}-disk-0,size=${DISK}G"
+    ;;
+  "")
+    warn "Could not determine storage type for '${STORAGE}'. Using generic disk spec which usually works."
+    DISK_SPEC="${STORAGE}:vm-${VMID}-disk-0,size=${DISK}G"
+    ;;
+  *)
+    warn "Storage type '${STORAGE_TYPE}' is unrecognized; attempting generic disk spec."
+    DISK_SPEC="${STORAGE}:vm-${VMID}-disk-0,size=${DISK}G"
+    ;;
+esac
+
+info "Disk specification: ${DISK_SPEC}"
+
+# Validate storage exists (best-effort)
 if ! pvesm status "$STORAGE" >/dev/null 2>&1; then
-  warn "Storage '${STORAGE}' not found in pvesm. Proceeding anyway — qm create may fail."
+  warn "Storage '${STORAGE}' not found according to pvesm; qm create may fail. Please verify storage name."
 fi
 
 # ---- Create the VM ----
 info "Creating VM ${VMID} on node ${NODE}..."
-
-# IMPORTANT: scsi0 must be specified in a form Proxmox accepts.
-# Use <storage>:vm-<vmid>-disk-0,size=<size> which is accepted for creating a new volume.
-DISK_SPEC="${STORAGE}:vm-${VMID}-disk-0,size=${DISK}G"
 
 qm_cmd=(qm create "$VMID" --name "$NAME" --cores "$CORES" --memory "$MEMORY" --net0 "virtio,bridge=${BRIDGE}" --scsihw virtio-scsi-pci)
 qm_cmd+=("--scsi0" "$DISK_SPEC")
