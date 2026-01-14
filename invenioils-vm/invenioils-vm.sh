@@ -25,12 +25,18 @@
 #
 set -euo pipefail
 
-# temporarily disable "nounset" so build.func can reference variables like SSH_CLIENT
+# Predefine common SSH environment variables to avoid "unbound variable" errors
+# when build.func references them while the script runs with "set -u".
+export SSH_CLIENT="${SSH_CLIENT:-}"
+export SSH_CONNECTION="${SSH_CONNECTION:-}"
+export SSH_TTY="${SSH_TTY:-}"
+
+# temporarily disable "nounset" so build.func can reference variables like SSH_CLIENT during sourcing
 set +u
 source <(curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/misc/build.func)
 set -u
 
-APP="InvenioILS"
+APP="InvenioILS (invenio-app-ils)"
 var_tags="${var_tags:-invenio;ils;invenioils}"
 var_cpu="${var_cpu:-2}"
 var_ram="${var_ram:-8192}"        # MB recommended for OpenSearch + services
