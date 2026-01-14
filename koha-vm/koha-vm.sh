@@ -9,17 +9,8 @@
 #
 # Intended to be run as root on the Proxmox host.
 #
-# High-level flow:
-#  - gather parameters (VMID, name, resources, storage, ISO/cloud image)
-#  - create VM (cloud-init disk)
-#  - start VM
-#  - optionally copy and run an installer script on the VM via SSH
-#
-# Prompts the user for:
-#  - cloud-init user/password (or SSH key)
-#  - VM IP (required for automatic remote install)
-#  - MariaDB Koha DB password
-#  - Koha SYSTEM (admin) password
+# NOTE: This version fixes prompt display so that if no default value is available
+# the prompt will not show an empty bracket (avoids weird box characters).
 #
 set -euo pipefail
 PROGNAME="$(basename "$0")"
@@ -27,21 +18,29 @@ API_FUNC_URL="https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main
 TMPDIR="$(mktemp -d)"
 trap 'rm -rf "$TMPDIR"' EXIT
 
-# ---- Basic logging & helpers (small, similar style to nextcloud-vm.sh) ----
+# ---- Basic logging & helpers ----
 info()  { printf '\033[1;34m[INFO]\033[0m %s\n' "$*"; }
 warn()  { printf '\033[1;33m[WARN]\033[0m %s\n' "$*"; }
 err()   { printf '\033[1;31m[ERR]\033[0m %s\n' "$*" >&2; }
 die()   { err "$*"; exit 1; }
 
+# Trim helper (remove leading/trailing whitespace)
+_trim() {
+  # usage: _trim "  string  "
+  printf '%s' "$1" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'
+}
+
+# Improved prompt: only show [default] when default is non-empty after trimming.
 prompt() {
   # prompt <varname> <prompt text> [default]
   local __var="$1"; shift
   local text="$1"; shift
   local default="${1:-}"
-  local reply
-  if [[ -n "$default" ]]; then
-    read -rp "$text [$default]: " reply
-    reply="${reply:-$default}"
+  local dtrim reply
+  dtrim="$(_trim "$default")"
+  if [[ -n "$dtrim" ]]; then
+    read -rp "$text [$dtrim]: " reply
+    reply="${reply:-$dtrim}"
   else
     read -rp "$text: " reply
   fi
@@ -85,8 +84,11 @@ if [[ $EUID -ne 0 ]]; then
 fi
 
 # ---- Defaults & prompts for VM creation ----
-# Use awk to skip the header row from pvesh output and pick the first real node
-DEFAULT_NODE="$(pvesh get /nodes 2>/dev/null | awk 'NR>1 {print $1; exit}' || true)"
+# Attempt to pick a sensible node name while stripping non-printable characters.
+RAW_NODE="$(pvesh get /nodes 2>/dev/null || true)"
+# Extract first token on second+ lines, then remove any non-alphanumeric/underscore/dash/dot characters.
+DEFAULT_NODE="$(printf '%s' "$RAW_NODE" | awk 'NR>1 {print $1; exit}' || true)"
+DEFAULT_NODE="$(printf '%s' "$DEFAULT_NODE" | tr -cd '[:alnum:]._-' )"
 DEFAULT_NODE="${DEFAULT_NODE:-pve}"
 
 prompt NODE "Proxmox node to create VM on" "$DEFAULT_NODE"
