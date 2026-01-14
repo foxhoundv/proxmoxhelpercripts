@@ -30,7 +30,7 @@ set +u
 source <(curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/misc/build.func)
 set -u
 
-APP="InvenioILS (invenio-app-ils)"
+APP="InvenioILS"
 var_tags="${var_tags:-invenio;ils;invenioils}"
 var_cpu="${var_cpu:-2}"
 var_ram="${var_ram:-8192}"        # MB recommended for OpenSearch + services
