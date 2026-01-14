@@ -9,8 +9,7 @@
 #
 # Intended to be run as root on the Proxmox host.
 #
-# NOTE: This version fixes prompt display so that if no default value is available
-# the prompt will not show an empty bracket (avoids weird box characters).
+# NOTE: Fixed disk parameter format for qm create to avoid LVM parsing errors.
 #
 set -euo pipefail
 PROGNAME="$(basename "$0")"
@@ -18,7 +17,7 @@ API_FUNC_URL="https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main
 TMPDIR="$(mktemp -d)"
 trap 'rm -rf "$TMPDIR"' EXIT
 
-# ---- Basic logging & helpers ----
+# ---- Basic logging & helpers (small, similar style to nextcloud-vm.sh) ----
 info()  { printf '\033[1;34m[INFO]\033[0m %s\n' "$*"; }
 warn()  { printf '\033[1;33m[WARN]\033[0m %s\n' "$*"; }
 err()   { printf '\033[1;31m[ERR]\033[0m %s\n' "$*" >&2; }
@@ -118,11 +117,20 @@ prompt KOHA_SITE "Koha site identifier (e.g. library)" "library"
 prompt_password KOHA_DB_PASSWORD "MariaDB Koha DB password (for 'koha' user)"
 prompt_password KOHA_ADMIN_PASSWORD "Koha SYSTEM (admin) password"
 
+# ---- Validate storage parameter (basic) ----
+if ! pvesm status "$STORAGE" >/dev/null 2>&1; then
+  warn "Storage '${STORAGE}' not found in pvesm. Proceeding anyway — qm create may fail."
+fi
+
 # ---- Create the VM ----
 info "Creating VM ${VMID} on node ${NODE}..."
 
+# IMPORTANT: scsi0 must be specified in a form Proxmox accepts.
+# Use <storage>:vm-<vmid>-disk-0,size=<size> which is accepted for creating a new volume.
+DISK_SPEC="${STORAGE}:vm-${VMID}-disk-0,size=${DISK}G"
+
 qm_cmd=(qm create "$VMID" --name "$NAME" --cores "$CORES" --memory "$MEMORY" --net0 "virtio,bridge=${BRIDGE}" --scsihw virtio-scsi-pci)
-qm_cmd+=("--scsi0" "${STORAGE}:${DISK}G")
+qm_cmd+=("--scsi0" "$DISK_SPEC")
 qm_cmd+=("--ide2" "${STORAGE}:cloudinit")
 qm_cmd+=("--serial0" "socket" "--vmgenid" "1" "--boot" "order=scsi0")
 
