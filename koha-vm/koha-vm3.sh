@@ -676,36 +676,63 @@ EOF
 msg_ok "Created installation script"
 
 msg_info "Injecting installation files into VM image"
-# Mount the image and inject files
+# Clean up any existing NBD connections
+qemu-nbd --disconnect /dev/nbd0 2>/dev/null || true
+sleep 1
+
+# Ensure NBD module is loaded
 modprobe nbd max_part=8
-qemu-nbd --connect=/dev/nbd0 ${FILE}
-sleep 3
 
-# Wait for partitions to be available
-partprobe /dev/nbd0 2>/dev/null || true
-sleep 2
+# Find an available NBD device
+NBD_DEV=""
+for i in {0..15}; do
+  if ! lsblk /dev/nbd$i >/dev/null 2>&1 || [ ! -e /sys/block/nbd$i/pid ]; then
+    NBD_DEV="/dev/nbd$i"
+    break
+  fi
+done
 
-# List available partitions
-lsblk /dev/nbd0
-
-# Find the root partition - look for the largest partition
-ROOT_PART=$(lsblk /dev/nbd0 -b -o NAME,SIZE | grep nbd0p | sort -k2 -n -r | head -1 | awk '{print $1}' | sed 's/nbd0p//')
-
-if [ -z "$ROOT_PART" ]; then
-  msg_error "Could not find root partition"
-  qemu-nbd --disconnect /dev/nbd0
+if [ -z "$NBD_DEV" ]; then
+  msg_error "No available NBD devices found"
   exit 1
 fi
 
-echo "Using partition: /dev/nbd0p${ROOT_PART}"
+echo "Using NBD device: $NBD_DEV"
+
+# Connect the image
+qemu-nbd --connect=$NBD_DEV ${FILE}
+if [ $? -ne 0 ]; then
+  msg_error "Failed to connect image to $NBD_DEV"
+  exit 1
+fi
+sleep 3
+
+# Wait for partitions to be available
+partprobe $NBD_DEV 2>/dev/null || true
+sleep 2
+
+# List available partitions
+lsblk $NBD_DEV
+
+# Find the root partition - look for the largest partition
+ROOT_PART=$(lsblk $NBD_DEV -b -o NAME,SIZE | grep $(basename $NBD_DEV)p | sort -k2 -n -r | head -1 | awk '{print $1}' | sed "s/$(basename $NBD_DEV)p//")
+
+if [ -z "$ROOT_PART" ]; then
+  msg_error "Could not find root partition"
+  qemu-nbd --disconnect $NBD_DEV
+  exit 1
+fi
+
+PART_DEV="${NBD_DEV}p${ROOT_PART}"
+echo "Using partition: $PART_DEV"
 
 mkdir -p /mnt/koha-temp
-mount /dev/nbd0p${ROOT_PART} /mnt/koha-temp
+mount $PART_DEV /mnt/koha-temp
 
 # Verify mount was successful
 if ! mountpoint -q /mnt/koha-temp; then
   msg_error "Failed to mount partition"
-  qemu-nbd --disconnect /dev/nbd0
+  qemu-nbd --disconnect $NBD_DEV
   rmdir /mnt/koha-temp
   exit 1
 fi
@@ -729,7 +756,7 @@ fi
 # Unmount and cleanup
 sync
 umount /mnt/koha-temp
-qemu-nbd --disconnect /dev/nbd0
+qemu-nbd --disconnect $NBD_DEV
 rmdir /mnt/koha-temp
 
 msg_ok "Injected installation files"
