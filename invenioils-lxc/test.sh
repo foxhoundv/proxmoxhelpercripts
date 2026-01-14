@@ -11,7 +11,7 @@ source <(curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxV
 # It creates an UNPRIVILEGED LXC and provisions rootless Podman + podman-compose
 # to run the invenio-app-ils docker-compose.full.yml stack inside the container.
 
-APP="InvenioILS (invenio-app-ils)"
+APP="InvenioILS"
 var_tags="${var_tags:-invenio;ils;invenioils}"
 var_cpu="${var_cpu:-2}"
 var_ram="${var_ram:-6144}"
