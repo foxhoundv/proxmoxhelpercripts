@@ -13,7 +13,7 @@ function header_info {
     __ __      __         _    ____  ___
    / //_/___  / /  ____ _| |  / /  |/  /
   / ,<  / _ \/ __ \/ __ `/ | / / /|_/ / 
- / /| |/ /_// / / / /_/ /| |/ / /  / /  
+ / /| |/ // / / / / /_/ /| |/ / /  / /  
 /_/ |_|\___/_/ /_/\__,_/ |___/_/  /_/   
                                         
 EOF
@@ -24,7 +24,7 @@ GEN_MAC=02:$(openssl rand -hex 5 | awk '{print toupper($0)}' | sed 's/\(..\)/\1:
 RANDOM_UUID="$(cat /proc/sys/kernel/random/uuid)"
 METHOD=""
 NSAPP="Koha"
-var_os="debian-12-standard_12.12-1_amd64.tar.zst"
+var_os="debian-12"
 var_version="n.d."
 
 YW=$(echo "\033[33m")
@@ -580,28 +580,50 @@ runcmd:
   - DEBIAN_FRONTEND=noninteractive apt-get install -y mariadb-server
   - systemctl enable mariadb
   - systemctl start mariadb
-  - apt-get install -y koha-common
+  - apt-get install -y koha-common xmlstarlet
   - a2enmod rewrite
   - a2enmod cgi
   - a2enmod headers proxy_http
   - koha-create --create-db --request-db root:$DB_ROOT_PASS $KOHA_INSTANCE
   - a2ensite $KOHA_INSTANCE
   - systemctl restart apache2
-  - echo "Koha installation complete!"
-  - echo "OPAC URL: http://$(hostname -I | awk '{print $1}')"
-  - echo "Staff URL: http://$(hostname -I | awk '{print $1}'):8080"
-  - echo "Koha admin password: $(koha-passwd $KOHA_INSTANCE)" > /root/koha-credentials.txt
+  - echo "Koha installation complete!" >> /root/koha-install.log
+  - echo "OPAC URL: http://\$(hostname -I | awk '{print \$1}')" >> /root/koha-install.log
+  - echo "Staff URL: http://\$(hostname -I | awk '{print \$1}'):8080" >> /root/koha-install.log
+  - sleep 5
+  - KOHA_PASS=\$(xmlstarlet sel -t -v 'yazgfs/config/pass' /etc/koha/sites/$KOHA_INSTANCE/koha-conf.xml 2>/dev/null || koha-passwd $KOHA_INSTANCE 2>/dev/null || echo "Run 'koha-passwd $KOHA_INSTANCE' to get password")
+  - echo "Koha Instance: $KOHA_INSTANCE" > /root/koha-credentials.txt
+  - echo "Koha Admin User: koha_$KOHA_INSTANCE" >> /root/koha-credentials.txt
+  - echo "Koha Admin Password: \$KOHA_PASS" >> /root/koha-credentials.txt
+  - echo "MariaDB Root Password: $DB_ROOT_PASS" >> /root/koha-credentials.txt
   - chmod 600 /root/koha-credentials.txt
+  - echo "Installation completed at \$(date)" >> /root/koha-install.log
 EOF
 
-qm set $VMID --cicustom "user=local:snippets/koha-user-data-${VMID}.yml"
 msg_ok "Configured Cloud-Init Settings"
 
 msg_info "Uploading Cloud-Init Configuration"
-pvesm path local:snippets >/dev/null 2>&1 || pvesm set local --content vztmpl,iso,snippets
-SNIPPET_DIR=$(pvesm path local:snippets | sed 's|/snippets||')
-mkdir -p $SNIPPET_DIR/snippets
-cp user-data $SNIPPET_DIR/snippets/koha-user-data-${VMID}.yml
+SNIPPET_STORAGE="local"
+SNIPPET_PATH=$(pvesm path ${SNIPPET_STORAGE}:snippets 2>/dev/null | sed 's|/snippets.*||')
+
+# If local doesn't support snippets, try to find one that does
+if [ -z "$SNIPPET_PATH" ]; then
+  # Enable snippets on local storage if possible
+  pvesm set local --content vztmpl,iso,snippets 2>/dev/null
+  SNIPPET_PATH=$(pvesm path ${SNIPPET_STORAGE}:snippets 2>/dev/null | sed 's|/snippets.*||')
+fi
+
+if [ -z "$SNIPPET_PATH" ]; then
+  msg_error "Cannot find storage that supports snippets"
+  exit 1
+fi
+
+mkdir -p ${SNIPPET_PATH}/snippets
+cp user-data ${SNIPPET_PATH}/snippets/koha-user-data-${VMID}.yml
+chmod 644 ${SNIPPET_PATH}/snippets/koha-user-data-${VMID}.yml
+
+# Set cloud-init configuration
+qm set $VMID --cicustom "user=${SNIPPET_STORAGE}:snippets/koha-user-data-${VMID}.yml" >/dev/null
 msg_ok "Uploaded Cloud-Init Configuration"
 
 if [ -n "$DISK_SIZE" ]; then
