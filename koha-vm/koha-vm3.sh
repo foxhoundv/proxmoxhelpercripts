@@ -538,10 +538,6 @@ qm set $VMID \
   -serial0 socket >/dev/null
 msg_ok "Created Koha VM ${CL}${BL}(${HN})"
 
-msg_info "Adding Cloud-Init Drive"
-qm set $VMID -ide2 $STORAGE:cloudinit >/dev/null
-msg_ok "Added Cloud-Init Drive"
-
 msg_info "Configuring Cloud-Init Settings"
 # Prompt for root password
 while true; do
@@ -587,75 +583,135 @@ if [ -f ~/.ssh/id_rsa.pub ]; then
   fi
 fi
 
-# Create cloud-init user-data
-cat > user-data <<EOF
-#cloud-config
-users:
-  - name: root
-    lock_passwd: false
-    passwd: $(openssl passwd -6 "$ROOT_PASS")
-$([ -n "$SSH_KEY" ] && echo "    ssh_authorized_keys:
-      - $SSH_KEY")
-package_update: true
-package_upgrade: true
-packages:
-  - gnupg2
-  - wget
-  - curl
-runcmd:
-  - echo "deb http://debian.koha-community.org/koha stable main" > /etc/apt/sources.list.d/koha.list
-  - wget -qO - http://debian.koha-community.org/koha/gpg.asc | apt-key add -
-  - apt-get update
-  - echo "mariadb-server mysql-server/root_password password $DB_ROOT_PASS" | debconf-set-selections
-  - echo "mariadb-server mysql-server/root_password_again password $DB_ROOT_PASS" | debconf-set-selections
-  - DEBIAN_FRONTEND=noninteractive apt-get install -y mariadb-server
-  - systemctl enable mariadb
-  - systemctl start mariadb
-  - apt-get install -y koha-common xmlstarlet
-  - a2enmod rewrite
-  - a2enmod cgi
-  - a2enmod headers proxy_http
-  - koha-create --create-db --request-db root:$DB_ROOT_PASS $KOHA_INSTANCE
-  - a2ensite $KOHA_INSTANCE
-  - systemctl restart apache2
-  - echo "Koha installation complete!" >> /root/koha-install.log
-  - echo "OPAC URL: http://\$(hostname -I | awk '{print \$1}')" >> /root/koha-install.log
-  - echo "Staff URL: http://\$(hostname -I | awk '{print \$1}'):8080" >> /root/koha-install.log
-  - sleep 5
-  - KOHA_PASS=\$(xmlstarlet sel -t -v 'yazgfs/config/pass' /etc/koha/sites/$KOHA_INSTANCE/koha-conf.xml 2>/dev/null || koha-passwd $KOHA_INSTANCE 2>/dev/null || echo "Run 'koha-passwd $KOHA_INSTANCE' to get password")
-  - echo "Koha Instance: $KOHA_INSTANCE" > /root/koha-credentials.txt
-  - echo "Koha Admin User: koha_$KOHA_INSTANCE" >> /root/koha-credentials.txt
-  - echo "Koha Admin Password: \$KOHA_PASS" >> /root/koha-credentials.txt
-  - echo "MariaDB Root Password: $DB_ROOT_PASS" >> /root/koha-credentials.txt
-  - chmod 600 /root/koha-credentials.txt
-  - echo "Installation completed at \$(date)" >> /root/koha-install.log
+# Set basic cloud-init parameters
+qm set $VMID --cipassword="$ROOT_PASS" >/dev/null
+msg_ok "Set root password via Cloud-Init"
+
+msg_info "Adding Cloud-Init Drive"
+qm set $VMID -ide2 $STORAGE:cloudinit >/dev/null
+msg_ok "Added Cloud-Init Drive"
+
+msg_info "Creating installation script"
+# Create installation script that will run on first boot
+cat > install-koha.sh <<'EOFSCRIPT'
+#!/bin/bash
+set -e
+exec > /root/koha-install.log 2>&1
+
+echo "Starting Koha installation at $(date)"
+
+# Add Koha repository
+echo "deb http://debian.koha-community.org/koha stable main" > /etc/apt/sources.list.d/koha.list
+wget -qO - http://debian.koha-community.org/koha/gpg.asc | apt-key add -
+
+# Update package lists
+apt-get update
+
+# Install MariaDB
+echo "mariadb-server mysql-server/root_password password DBPASSWORD" | debconf-set-selections
+echo "mariadb-server mysql-server/root_password_again password DBPASSWORD" | debconf-set-selections
+DEBIAN_FRONTEND=noninteractive apt-get install -y mariadb-server
+systemctl enable mariadb
+systemctl start mariadb
+
+# Install Koha
+apt-get install -y koha-common xmlstarlet
+
+# Enable Apache modules
+a2enmod rewrite cgi headers proxy_http
+
+# Create Koha instance
+koha-create --create-db --request-db root:DBPASSWORD INSTANCENAME
+a2ensite INSTANCENAME
+systemctl restart apache2
+
+# Get Koha credentials
+sleep 5
+KOHA_PASS=$(xmlstarlet sel -t -v 'yazgfs/config/pass' /etc/koha/sites/INSTANCENAME/koha-conf.xml 2>/dev/null || koha-passwd INSTANCENAME 2>/dev/null || echo "Run 'koha-passwd INSTANCENAME' to get password")
+
+# Save credentials
+cat > /root/koha-credentials.txt <<EOF
+Koha Instance: INSTANCENAME
+Koha Admin User: koha_INSTANCENAME
+Koha Admin Password: $KOHA_PASS
+MariaDB Root Password: DBPASSWORD
+OPAC URL: http://$(hostname -I | awk '{print $1}')
+Staff URL: http://$(hostname -I | awk '{print $1}'):8080
+EOF
+chmod 600 /root/koha-credentials.txt
+
+echo "Koha installation completed at $(date)"
+echo "Credentials saved to /root/koha-credentials.txt"
+
+# Remove this script and service after successful installation
+systemctl disable koha-install.service
+rm -f /etc/systemd/system/koha-install.service
+rm -f /root/install-koha.sh
+systemctl daemon-reload
+EOFSCRIPT
+
+# Replace placeholders
+sed -i "s/DBPASSWORD/$DB_ROOT_PASS/g" install-koha.sh
+sed -i "s/INSTANCENAME/$KOHA_INSTANCE/g" install-koha.sh
+chmod +x install-koha.sh
+
+# Create systemd service for first boot
+cat > koha-install.service <<EOF
+[Unit]
+Description=Koha Installation Script
+After=network-online.target cloud-init.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/root/install-koha.sh
+RemainAfterExit=yes
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
 EOF
 
-msg_ok "Configured Cloud-Init Settings"
+msg_ok "Created installation script"
 
-msg_info "Uploading Cloud-Init Configuration"
-SNIPPET_STORAGE="local"
-SNIPPET_PATH=$(pvesm path ${SNIPPET_STORAGE}:snippets 2>/dev/null | sed 's|/snippets.*||')
+msg_info "Injecting installation files into VM image"
+# Mount the image and inject files
+modprobe nbd max_part=8
+qemu-nbd --connect=/dev/nbd0 ${FILE}
+sleep 2
 
-# If local doesn't support snippets, try to find one that does
-if [ -z "$SNIPPET_PATH" ]; then
-  # Enable snippets on local storage if possible
-  pvesm set local --content vztmpl,iso,snippets 2>/dev/null
-  SNIPPET_PATH=$(pvesm path ${SNIPPET_STORAGE}:snippets 2>/dev/null | sed 's|/snippets.*||')
+# Find the root partition
+ROOT_PART=$(lsblk /dev/nbd0 -o NAME,FSTYPE,MOUNTPOINT | grep -E 'ext4|xfs' | head -1 | awk '{print $1}' | sed 's/[^0-9]*//g')
+if [ -z "$ROOT_PART" ]; then
+  ROOT_PART="1"
 fi
 
-if [ -z "$SNIPPET_PATH" ]; then
-  msg_error "Cannot find storage that supports snippets"
-  exit 1
+mkdir -p /mnt/koha-temp
+mount /dev/nbd0p${ROOT_PART} /mnt/koha-temp
+
+# Copy files
+cp install-koha.sh /mnt/koha-temp/root/
+cp koha-install.service /mnt/koha-temp/etc/systemd/system/
+chmod +x /mnt/koha-temp/root/install-koha.sh
+
+# Enable the service
+ln -sf /etc/systemd/system/koha-install.service /mnt/koha-temp/etc/systemd/system/multi-user.target.wants/koha-install.service
+
+# Add SSH key if provided
+if [ -n "$SSH_KEY" ]; then
+  mkdir -p /mnt/koha-temp/root/.ssh
+  echo "$SSH_KEY" >> /mnt/koha-temp/root/.ssh/authorized_keys
+  chmod 700 /mnt/koha-temp/root/.ssh
+  chmod 600 /mnt/koha-temp/root/.ssh/authorized_keys
 fi
 
-mkdir -p ${SNIPPET_PATH}/snippets
-cp user-data ${SNIPPET_PATH}/snippets/koha-user-data-${VMID}.yml
-chmod 644 ${SNIPPET_PATH}/snippets/koha-user-data-${VMID}.yml
+# Unmount
+umount /mnt/koha-temp
+qemu-nbd --disconnect /dev/nbd0
+rmdir /mnt/koha-temp
 
-# Set cloud-init configuration
-qm set $VMID --cicustom "user=${SNIPPET_STORAGE}:snippets/koha-user-data-${VMID}.yml" >/dev/null
-msg_ok "Uploaded Cloud-Init Configuration"
+msg_ok "Injected installation files"
 
 if [ -n "$DISK_SIZE" ]; then
   msg_info "Resizing disk to $DISK_SIZE"
