@@ -13,7 +13,7 @@
 #   sudo ./invenioils-vm.sh
 #
 # This script will:
-# - source the community-scripts build.func helpers
+# - source the community-scripts build.func helpers (sourced with nounset temporarily disabled)
 # - define VM defaults (name, cpu, ram, disk, template)
 # - call the helper start/build functions to create the VM
 # - attempt to detect the VM IP (if build.func provides it)
@@ -25,8 +25,10 @@
 #
 set -euo pipefail
 
-# Source community helper functions (must be available)
+# temporarily disable "nounset" so build.func can reference variables like SSH_CLIENT
+set +u
 source <(curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/misc/build.func)
+set -u
 
 APP="InvenioILS (invenio-app-ils)"
 var_tags="${var_tags:-invenio;ils;invenioils}"
