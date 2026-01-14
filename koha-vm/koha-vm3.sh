@@ -450,6 +450,18 @@ check_root
 arch_check
 pve_check
 ssh_check
+
+# Clean up any stuck NBD devices from previous runs
+msg_info "Cleaning up NBD devices"
+for i in {0..15}; do
+  qemu-nbd --disconnect /dev/nbd$i 2>/dev/null || true
+done
+# Remove NBD module and reload it to ensure clean state
+rmmod nbd 2>/dev/null || true
+sleep 1
+modprobe nbd max_part=8
+msg_ok "NBD devices cleaned"
+
 start_script
 
 post_to_api_vm
