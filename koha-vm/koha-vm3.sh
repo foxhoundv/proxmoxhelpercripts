@@ -13,7 +13,7 @@ function header_info {
     __ __      __         _    ____  ___
    / //_/___  / /  ____ _| |  / /  |/  /
   / ,<  / _ \/ __ \/ __ `/ | / / /|_/ / 
- / /| |/  __/ / / / /_/ /| |/ / /  / /  
+ / /| |/ // / / / / /_/ /| |/ / /  / /  
 /_/ |_|\___/_/ /_/\__,_/ |___/_/  /_/   
                                         
 EOF
@@ -728,8 +728,8 @@ lsblk $NBD_DEV
 
 # Find the root partition - look for the largest partition
 # Use --noheadings and --raw to avoid tree characters
-NBD_BASE=$(basename $NBD_DEV)
-ROOT_PART=$(lsblk $NBD_DEV -b -n -o NAME,SIZE | grep "${NBD_BASE}p" | sort -k2 -n -r | head -1 | awk '{print $1}' | grep -o '[0-9]*
+NBD_BASE=$(basename "$NBD_DEV")
+ROOT_PART=$(lsblk -b -n -o NAME,SIZE "$NBD_DEV" | grep "${NBD_BASE}p" | sort -k2 -n -r | head -n1 | awk '{print $1}' | grep -o '[0-9]\+')
 
 if [ -n "$DISK_SIZE" ]; then
   msg_info "Resizing disk to $DISK_SIZE"
@@ -824,7 +824,7 @@ fi
 post_update_to_api "done" "none"
 msg_ok "Completed successfully!\n"
 msg_info "Debian image cached at ${CL}${BL}${CACHED_FILE}${CL}"
-msg_info "To clear cache, run: ${CL}${BL}rm -rf /var/cache/pve-helper-scripts${CL}\n")
+msg_info "To clear cache, run: ${CL}${BL}rm -rf /var/cache/pve-helper-scripts${CL}\n"
 
 if [ -z "$ROOT_PART" ]; then
   msg_error "Could not find root partition"
