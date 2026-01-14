@@ -727,7 +727,103 @@ sleep 2
 lsblk $NBD_DEV
 
 # Find the root partition - look for the largest partition
-ROOT_PART=$(lsblk $NBD_DEV -b -o NAME,SIZE | grep $(basename $NBD_DEV)p | sort -k2 -n -r | head -1 | awk '{print $1}' | sed "s/$(basename $NBD_DEV)p//")
+# Use --noheadings and --raw to avoid tree characters
+NBD_BASE=$(basename $NBD_DEV)
+ROOT_PART=$(lsblk $NBD_DEV -b -n -o NAME,SIZE | grep "${NBD_BASE}p" | sort -k2 -n -r | head -1 | awk '{print $1}' | grep -o '[0-9]*
+
+if [ -n "$DISK_SIZE" ]; then
+  msg_info "Resizing disk to $DISK_SIZE"
+  qm resize $VMID scsi0 ${DISK_SIZE} >/dev/null
+  msg_ok "Resized disk to $DISK_SIZE"
+fi
+
+DESCRIPTION=$(
+  cat <<EOF
+<div align='center'>
+  <a href='https://Helper-Scripts.com' target='_blank' rel='noopener noreferrer'>
+    <img src='https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/misc/images/logo-81x112.png' alt='Logo' style='width:81px;height:112px;'/>
+  </a>
+
+  <h2 style='font-size: 24px; margin: 20px 0;'>Koha VM</h2>
+
+  <p style='margin: 16px 0;'>Library Management System</p>
+
+  <p style='margin: 16px 0;'>
+    <a href='https://ko-fi.com/community_scripts' target='_blank' rel='noopener noreferrer'>
+      <img src='https://img.shields.io/badge/&#x2615;-Buy us a coffee-blue' alt='Buy Coffee' />
+    </a>
+  </p>
+  
+  <span style='margin: 0 10px;'>
+    <i class="fa fa-github fa-fw" style="color: #f5f5f5;"></i>
+    <a href='https://github.com/community-scripts/ProxmoxVE' target='_blank' rel='noopener noreferrer' style='text-decoration: none; color: #00617f;'>GitHub</a>
+  </span>
+  <span style='margin: 0 10px;'>
+    <i class="fa fa-book fa-fw" style="color: #f5f5f5;"></i>
+    <a href='https://koha-community.org/' target='_blank' rel='noopener noreferrer' style='text-decoration: none; color: #00617f;'>Koha Docs</a>
+  </span>
+</div>
+
+<hr>
+
+<h3>Access Information</h3>
+<ul>
+  <li><strong>Instance Name:</strong> $KOHA_INSTANCE</li>
+  <li><strong>OPAC URL:</strong> http://[VM-IP]</li>
+  <li><strong>Staff Interface:</strong> http://[VM-IP]:8080</li>
+  <li><strong>Credentials:</strong> Located in /root/koha-credentials.txt</li>
+</ul>
+
+<h3>Post-Installation Steps</h3>
+<ol>
+  <li>SSH into the VM: <code>ssh root@[VM-IP]</code></li>
+  <li>Get admin password: <code>cat /root/koha-credentials.txt</code></li>
+  <li>Access staff interface at http://[VM-IP]:8080</li>
+  <li>Complete the web installer</li>
+</ol>
+EOF
+)
+qm set $VMID -description "$DESCRIPTION" >/dev/null
+msg_ok "Set VM Description"
+
+if [ "$START_VM" == "yes" ]; then
+  msg_info "Starting Koha VM"
+  qm start $VMID
+  msg_ok "Started Koha VM"
+  
+  echo -e "\n${INFO}${YW}Waiting for VM to boot and complete installation...${CL}"
+  echo -e "${INFO}${YW}This may take 5-10 minutes depending on network speed.${CL}"
+  echo -e "${INFO}${YW}You can monitor progress in the VM console.${CL}\n"
+  
+  sleep 10
+  
+  # Try to get IP address
+  for i in {1..30}; do
+    VM_IP=$(qm guest cmd $VMID network-get-interfaces 2>/dev/null | grep -oP '(?<="ip-address":")[^"]*' | grep -v "127.0.0.1" | head -n1)
+    if [ -n "$VM_IP" ]; then
+      break
+    fi
+    sleep 10
+  done
+  
+  if [ -n "$VM_IP" ]; then
+    echo -e "${INFO}${GN}Koha VM is accessible at:${CL}"
+    echo -e "${TAB}${BL}OPAC: http://$VM_IP${CL}"
+    echo -e "${TAB}${BL}Staff Interface: http://$VM_IP:8080${CL}"
+    echo -e "${TAB}${BL}Instance: $KOHA_INSTANCE${CL}"
+    echo -e "\n${INFO}${YW}To get Koha admin credentials:${CL}"
+    echo -e "${TAB}${BL}ssh root@$VM_IP${CL}"
+    echo -e "${TAB}${BL}cat /root/koha-credentials.txt${CL}\n"
+  else
+    echo -e "${INFO}${YW}VM is starting. Check ProxMox console for IP address.${CL}"
+    echo -e "${INFO}${YW}Once booted, credentials will be in /root/koha-credentials.txt${CL}\n"
+  fi
+fi
+
+post_update_to_api "done" "none"
+msg_ok "Completed successfully!\n"
+msg_info "Debian image cached at ${CL}${BL}${CACHED_FILE}${CL}"
+msg_info "To clear cache, run: ${CL}${BL}rm -rf /var/cache/pve-helper-scripts${CL}\n")
 
 if [ -z "$ROOT_PART" ]; then
   msg_error "Could not find root partition"
@@ -737,6 +833,14 @@ fi
 
 PART_DEV="${NBD_DEV}p${ROOT_PART}"
 echo "Using partition: $PART_DEV"
+
+# Verify partition exists
+if [ ! -b "$PART_DEV" ]; then
+  msg_error "Partition device $PART_DEV does not exist"
+  lsblk $NBD_DEV
+  qemu-nbd --disconnect $NBD_DEV
+  exit 1
+fi
 
 mkdir -p /mnt/koha-temp
 mount $PART_DEV /mnt/koha-temp
