@@ -85,7 +85,8 @@ if [[ $EUID -ne 0 ]]; then
 fi
 
 # ---- Defaults & prompts for VM creation ----
-DEFAULT_NODE="$(pvesh get /nodes 2>/dev/null | awk 'NR==1{print $1}' || true)"
+# Use awk to skip the header row from pvesh output and pick the first real node
+DEFAULT_NODE="$(pvesh get /nodes 2>/dev/null | awk 'NR>1 {print $1; exit}' || true)"
 DEFAULT_NODE="${DEFAULT_NODE:-pve}"
 
 prompt NODE "Proxmox node to create VM on" "$DEFAULT_NODE"
